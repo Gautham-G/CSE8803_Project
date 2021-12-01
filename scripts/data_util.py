@@ -2,8 +2,6 @@ import pandas as pd
 import json
 import zipfile
 from glob import glob
-import os
-import gzip
 from tqdm import tqdm
 import numpy as np
 from datetime import timedelta
@@ -69,12 +67,12 @@ def get_NYC_ZIP_List():
 
 def write_NYC_crosswalk():
 
-    crosswalk = pd.read_excel('../data/ZIP_TRACT_crosswalk.xlsx')
+    crosswalk = pd.read_excel('../data/TRACT_ZIP_crosswalk.xlsx')
     crosswalk.ZIP = crosswalk.ZIP.astype('str')
     crosswalk.TRACT = crosswalk.TRACT.astype('str')
     crosswalk = crosswalk.loc[crosswalk.ZIP.isin(get_NYC_ZIP_List()), :]
 
-    crosswalk.to_csv('../data/NYC_ZIP_to_TRACT.csv', index=False)
+    crosswalk.to_csv('../data/NYC_TRACT_to_ZIP.csv', index=False)
 
 
 
@@ -90,57 +88,48 @@ def unzip_patterns():
 
 
 
-def clean_patterns_unaggregated(trip_threshold):
+def clean_patterns_unaggregated(starting_from = '2020-08-17'):
     """
-    trip_threshold: total count of trips per month. Pairs must have trips larger than trip_threshold to be included.
 
     :return: no return, write a csv file 'pattern_cleaned.csv' for each month
     """
-    cw = pd.read_csv('../data/NYC_ZIP_to_TRACT.csv')
+    cw = pd.read_csv('../data/NYC_TRACT_to_ZIP.csv')
     cw.ZIP, cw.TRACT = cw.ZIP.astype('str'), cw.TRACT.astype('str')
+    column_name = ['date_range_end', 'placekey', 'sg_wp2__visitor_home_aggregation']
 
-    column_name = ['placekey', 'visits_by_day','visitor_home_aggregation']
-    repo = os.listdir('..\\data\\patterns')
-    for r in repo:
-        file = '../data/patterns/{0}/patterns.csv.gz'.format(r)
-        print('Processing {0}'.format(file))
-        with gzip.open(file, 'rb') as f_in:
-            df = pd.read_csv(f_in)
+    df = pd.read_csv('..\\data\\patterns\\NY.csv')
+    df = df.loc[df['sg_wp2__visitor_home_aggregation'] != '{}', column_name]
+    df = df.loc[df['date_range_end'] >= starting_from, :]
+    df = df.rename(columns={'sg_wp2__visitor_home_aggregation': 'visitor'})
 
-            # exclude empty dict
-            df = df.loc[df['visitor_home_aggregation'] != '{}',column_name]
 
-            # trip count threshold: exclude pairs with less than n visits per month
-            # trip_threshold = 30
-            l = [json.loads(x) for x in df['visitor_home_aggregation']]
-            s = np.array([sum([x[n] for n in x]) for x in l])
-            df = df.iloc[np.argwhere(s > trip_threshold).flatten(),:].reset_index(drop = True)
+    for week in df['date_range_end'].unique():
+        print('Processing Week {0}'.format(week))
+
+        df_week = df.loc[df['date_range_end'] == week, :].reset_index(drop = True)
+        visitor_list = [json.loads(dict) for dict in df_week.visitor]
 
         # loop through rows to map ZIP to TRACT
-        for i in tqdm(range(df.shape[0])):
-            dict = pd.DataFrame.from_dict(json.loads(df.loc[i, 'visitor_home_aggregation']), orient = 'index')\
-                .reset_index()\
-                .rename(columns = {'index':'TRACT', 0:'n'})\
-                .merge(cw, how='left', on='TRACT').loc[:, ['ZIP', 'n']]\
-                .dropna()\
-                .groupby('ZIP').agg({'n':'sum'}).reset_index()
-
-            dict = dict.loc[dict.n > 4, :]
-            print(dict.n.sum())
-            if dict.n.sum() > trip_threshold:
-
-                df['visitor_home_aggregation'][i] = dict.to_dict(orient = 'records')
+        for i in tqdm(range(df_week.shape[0])):
+            if sum([visitor_list[i][x] for x in visitor_list[i]]) < 9 or len(visitor_list[i]) < 3:
+                visitor_list[i] = ''
             else:
-                df['visitor_home_aggregation'][i] = ''
+                dic = pd.DataFrame.from_dict(visitor_list[i], orient = 'index')\
+                    .reset_index()\
+                    .rename(columns = {'index':'TRACT', 0:'n'})\
+                    .merge(cw, how='left', on='TRACT').loc[:, ['ZIP', 'n']]\
+                    .dropna()\
+                    .groupby('ZIP').agg({'n':'sum'}).reset_index()
 
+                if dic.shape[0] > 2:
+                    visitor_list[i] = dict( (dic['ZIP'][i], dic['n'][i]) for i in range(dic.shape[0]))
+                else:
+                    visitor_list[i] = ''
 
-        df = df.loc[df['visitor_home_aggregation'] != '',column_name]
-        df.to_csv('..\\data\\patterns\\patterns_{0}.csv'.format(r), index=False)
-        print('Process {0} Success'.format(file))
+        df_week['visitor'] = visitor_list
+        df_week = df_week.loc[df_week['visitor'] != '',:]
 
+        df_week.to_csv('..\\data\\patterns_cleaned\\patterns_combined_{0}.csv'.format(week), index=False)
 
-
-def clean_patterns_zip():
-    pass
 
 

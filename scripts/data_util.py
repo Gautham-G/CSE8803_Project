@@ -140,7 +140,3 @@ def clean_patterns_zip():
     pass
 
 
-
-if __name__ == '__main__':
-    unzip_patterns()
-    clean_patterns_unaggregated(trip_threshold = 30)

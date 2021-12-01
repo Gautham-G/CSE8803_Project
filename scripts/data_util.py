@@ -1,5 +1,7 @@
 import pandas as pd
 import json
+import zipfile
+from glob import glob
 
 
 def map_caseRate_ZCTA_to_CT():
@@ -49,4 +51,14 @@ def write_caseRate_by_ZCTA():
     caseRate = caseRate.loc[~caseRate.ZIP.isin(['SI','QN','MN','BK','BX','CITY']),:]
 
     caseRate.to_csv('../data/caserate_by_zcta_cleaned.csv', index=False)
-    
+
+
+
+def unzip_patterns():
+    """
+
+        :return: no return, unzip patterns zip to data. (do not push to github folder)
+        """
+    for file in glob("..\\data\\NY-PATTERNS*.zip"):
+        with zipfile.ZipFile(file, 'r') as zip_ref:
+            zip_ref.extractall('..\\data\\patterns\\{0}'.format(file.split('\\')[2].split('-')[2]))

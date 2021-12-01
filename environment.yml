@@ -9,6 +9,9 @@ dependencies:
   - scikit-learn=1.0
   - matplotlib
   - networkx
+  - pytorch=1.10
+  - cudatoolkit=10.2
+  - openpyxl=3.0
   - requests
   - pip
   - tqdm

@@ -6,7 +6,7 @@ import os
 import gzip
 from tqdm import tqdm
 import numpy as np
-
+from datetime import timedelta
 
 def map_caseRate_ZCTA_to_CT():
     """
@@ -53,6 +53,8 @@ def write_caseRate_by_ZCTA():
 
     # exclude aggregated statistics row
     caseRate = caseRate.loc[~caseRate.ZIP.isin(['SI','QN','MN','BK','BX','CITY']),:]
+    caseRate['week_ending'] = pd.to_datetime(caseRate['week_ending']) + timedelta(days = 2)
+    caseRate['week_ending'] =  caseRate['week_ending'].astype('str')
 
     caseRate.to_csv('../data/caserate_by_zcta_cleaned.csv', index=False)
 
@@ -124,7 +126,9 @@ def clean_patterns_unaggregated(trip_threshold):
                 .groupby('ZIP').agg({'n':'sum'}).reset_index()
 
             dict = dict.loc[dict.n > 4, :]
+            print(dict.n.sum())
             if dict.n.sum() > trip_threshold:
+
                 df['visitor_home_aggregation'][i] = dict.to_dict(orient = 'records')
             else:
                 df['visitor_home_aggregation'][i] = ''

@@ -12,11 +12,23 @@ import json, ast
 from tqdm import tqdm
 import pickle
 from model.encoders import FFN
+import optparse
 
 start_week = "2020-08-17"
 curr_week = "2021-09-27"
-ahead = 1
-lr=0.02
+
+# Command line arguments
+parser = optparse.OptionParser()
+parser.add_option('-a', '--ahead', dest="ahead", default=1, help="Weeks ahead")
+parser.add_option('-e', '--epochs', dest="epochs", default=1000, help="Number of epochs")
+parser.add_option('-l', '--lr', dest="lr", default=0.001, help="Learning rate")
+
+(options, args) = parser.parse_args()
+ahead = int(options.ahead)
+epochs = int(options.epochs)
+lr = float(options.lr)
+
+
 device = "cuda" if th.cuda.is_available() else "cpu"
 
 
@@ -156,7 +168,42 @@ def one_epoch(series):
     #print("ep", ep.ravel().detach().cpu().numpy())
     #print("wt",wt.detach().cpu().numpy())
 
-for _ in range(1000):
+for _ in range(400):
     one_epoch(train_series)
 
+z_encoder.eval()
+p_encoder.eval()
+w_encoder.eval()
+list_zip = th.LongTensor(np.arange(len(date_dict))).to(device)
+list_poi = th.LongTensor(np.arange(len(poi_dict))).to(device)
+losses = 0.
+preds_all, gt = [], []
+baselines, poi, wts = [], [], []
+for i in range(10, train_series.shape[1]):
+    batch_series = th.FloatTensor(train_series[:, :(i-ahead+1)]).to(device)
+    batch_labels = th.FloatTensor(train_series[:, i]).to(device)
+    wt_matrix = th.FloatTensor(visit_matrix[(i-ahead+1)].T/10.0).to(device)
+    ez, em_z = z_encoder.forward(list_zip, batch_series)
+    ep, em_p = p_encoder.forward(list_poi)
+    wt = w_encoder.forward(em_z, em_p, wt_matrix)
+    preds = ez + wt @ ep
+    preds_all.append(preds.detach().cpu().numpy().squeeze())
+    gt.append(batch_labels.detach().cpu().numpy().squeeze())
+    baselines.append(ez.detach().cpu().numpy().squeeze())
+    poi.append(ep.detach().cpu().numpy().squeeze())
+    wts.append(wt.detach().cpu().numpy().squeeze())
+preds_all= np.array(preds_all)
+gt = np.array(gt)
+baselines = np.array(baselines)
+poi = np.array(poi)
+wts = np.array(wts)
 
+os.makedirs("./pred_dir", exist_ok=True)
+with open(f"./pred_dir/preds_{ahead}.pkl", "wb") as f:
+    pickle.dump({
+        "preds": preds_all,
+        "gt": gt,
+        "baselines": baselines,
+        "poi": poi,
+        "wts": wts
+    }, f)

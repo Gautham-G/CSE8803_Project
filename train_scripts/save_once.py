@@ -37,7 +37,7 @@ for i in df["ZIP"].unique():
 # Make timeseries arrays
 tseries = np.zeros((len(df["ZIP"].unique()), curr_week_num + ahead))
 for i in tqdm(df["ZIP"].unique()):
-    for j in range(df["week_no"].max()):
+    for j in range(45):
         tseries[date_dict[i], j] = df["caseRate"][(df["ZIP"] == i) & (df["week_no"] == j)].values[0]
 
 os.makedirs('./saves', exist_ok=True)
@@ -61,7 +61,7 @@ with open('./saves/visit_counts_df.pkl', 'wb') as f:
 
 
 visits_count = []
-for w in range(df1["week_no"].max()):
+for w in range(45):
     print(f"Week {w}")
     df_w = df1[(df1['week_no'] == w)][['placekey','visitor']]
     v_dict = {}
@@ -71,3 +71,24 @@ for w in range(df1["week_no"].max()):
 
 with open('./saves/visits_count.pkl', 'wb') as f:
     pickle.dump(visits_count, f)
+
+intersect_pois = set(visits_count[0].keys())
+for i in range(1, len(visits_count)):
+    intersect_pois = intersect_pois.intersection(set(visits_count[i].keys()))
+
+poi_dict = {}
+ct = 0
+for i in intersect_pois:
+    poi_dict[i] = ct
+    ct += 1
+
+visit_matrix = np.zeros((len(visits_count), len(poi_dict), len(date_dict)))
+for i in range(len(visits_count)):
+    for j in poi_dict.keys():
+        for k in date_dict.keys():
+            if str(k) in visits_count[i][j].keys():
+                visit_matrix[i, poi_dict[j], date_dict[k]] = visits_count[i][j][str(k)] 
+
+
+with open("./saves/visit_matrix.pkl", "wb") as f:
+    pickle.dump(visit_matrix, f)

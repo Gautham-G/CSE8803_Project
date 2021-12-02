@@ -16,6 +16,8 @@ from model.encoders import FFN
 start_week = "2020-08-17"
 curr_week = "2021-09-27"
 ahead = 1
+lr=0.02
+device = "cuda" if th.cuda.is_available() else "cpu"
 
 
 def week_to_number(week: str):
@@ -24,7 +26,7 @@ def week_to_number(week: str):
     return (curr_date - start_date).days // 7
 
 
-curr_week_num = week_to_number(curr_week)
+curr_week_num = 45
 
 # Get zip time-series data
 df = pd.read_csv("data/caserate_by_zcta_cleaned.csv")
@@ -41,6 +43,10 @@ for i in df["ZIP"].unique():
 os.makedirs("./saves", exist_ok=True)
 with open("./saves/tseries.pkl", "rb") as f:
     tseries = pickle.load(f)
+
+# Min max scaler
+min_max_scaler = lambda x: (x - x.min()) / (x.max() - x.min())
+tseries = (tseries - np.min(tseries, axis=1, keepdims=True)) / (np.max(tseries, axis=1, keepdims=True) - np.min(tseries, axis=1, keepdims=True))
 
 with open("./saves/visit_counts_df.pkl", "rb") as f:
     df1 = pickle.load(f)
@@ -75,11 +81,10 @@ class ZipEncoder(nn.Module):
 
     def forward(self, zip_no, sequences):
         embed = self.embed_layer(zip_no)
-        embed = embed.unsqueeze(1)
-        embed = embed.repeat(1, sequences.shape[1], 1)
-        x = th.cat([embed, sequences], dim=2)
-        x = self.fc(x)
-        x, _ = self.rnn(x)
+        rnn_out, _ = self.rnn(sequences.unsqueeze(-1))
+        rnn_out = rnn_out[:, -1, :]
+        x = self.fc(embed)
+        x = th.cat([x, rnn_out], dim=1)
         x = self.fc2(x)
         return x, embed
 
@@ -92,7 +97,6 @@ class PoiEncoder(nn.Module):
 
     def forward(self, poi_no):
         embed = self.embed_layer(poi_no)
-        embed = embed.unsqueeze(1)
         x = self.fc(embed)
         return x, embed
 
@@ -102,12 +106,57 @@ class WeightsEncoder(nn.Module):
         super(WeightsEncoder, self).__init__()
         self.fc_zip = nn.Linear(embed_sz, final_sz)
         self.fc_poi = nn.Linear(embed_sz, final_sz)
-        self.lamda = nn.Parameter(th.Tensor(0.1), requires_grad=True)
+        self.lamda = nn.Parameter(th.tensor(0.1).to(device), requires_grad=True)
 
-    def forward(self, poi_embeds, zip_embeds, visit_matrix):
+    def forward(self, zip_embeds, poi_embeds, visit_matrix):
         zip_embeds = self.fc_zip(zip_embeds)
         poi_embeds = self.fc_poi(poi_embeds)
         product_embeds = zip_embeds @ th.transpose(poi_embeds, 0, 1)
         weights = th.exp(self.lamda) * th.sigmoid(product_embeds) * visit_matrix
         return weights
+
+z_encoder = ZipEncoder(embed_sz=40, num_zip=len(date_dict), final_sz=50, rnn_dim=50).to(device)
+#ez, em_z = z_encoder.forward(th.LongTensor([0,1,3]), th.randn(3, 10))
+
+p_encoder = PoiEncoder(embed_sz=40, num_poi=len(poi_dict)).to(device)
+#ep, em_p = p_encoder.forward(th.LongTensor([0,1,3,4,5]))
+
+w_encoder = WeightsEncoder(embed_sz=40, final_sz=50).to(device)
+#wt = w_encoder.forward(em_z, em_p, th.rand(3, 5))
+
+
+train_series = tseries[:, :curr_week_num]
+
+opt = th.optim.Adam(list(z_encoder.parameters()) + list(p_encoder.parameters()) + list(w_encoder.parameters()), lr=lr)
+
+# Prefix sequences
+def one_epoch(series):
+    z_encoder.train()
+    p_encoder.train()
+    w_encoder.train()
+    opt.zero_grad()
+    list_zip = th.LongTensor(np.arange(len(date_dict))).to(device)
+    list_poi = th.LongTensor(np.arange(len(poi_dict))).to(device)
+    losses = 0.
+    for i in range(10, series.shape[1]):
+        batch_series = th.FloatTensor(series[:, :(i-ahead+1)]).to(device)
+        batch_labels = th.FloatTensor(series[:, i]).to(device)
+        wt_matrix = th.FloatTensor(visit_matrix[(i-ahead+1)].T/10.0).to(device)
+        ez, em_z = z_encoder.forward(list_zip, batch_series)
+        ep, em_p = p_encoder.forward(list_poi)
+        wt = w_encoder.forward(em_z, em_p, wt_matrix)
+        preds = ez + wt @ ep
+        loss = th.mean((preds - batch_labels) ** 2)
+        losses += loss
+    tot_loss = losses
+    tot_loss.backward()
+    opt.step()
+    print(f"Total loss {tot_loss.detach().cpu().item()}")
+    #print("ez",ez.ravel().detach().cpu().numpy())
+    #print("ep", ep.ravel().detach().cpu().numpy())
+    #print("wt",wt.detach().cpu().numpy())
+
+for _ in range(1000):
+    one_epoch(train_series)
+
 

@@ -168,7 +168,8 @@ def one_epoch(series):
     #print("ep", ep.ravel().detach().cpu().numpy())
     #print("wt",wt.detach().cpu().numpy())
 
-for _ in range(400):
+for ep in range(epochs):
+    print(f"Epoch {ep+1}")
     one_epoch(train_series)
 
 z_encoder.eval()
